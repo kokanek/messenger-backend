@@ -1,0 +1,39 @@
+{
+  "name": "messenger-backend",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "vitest run --project shared --project auth-service --project message-service --project conversation-service",
+    "test:e2e": "vitest run --project e2e",
+    "build": "npm run build --workspaces",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@messenger/shared": "*",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^7.2.1",
+    "@types/ws": "^8.18.2",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "mongodb": "^7.7.0",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "prettier": "^3.9.10",
+    "supertest": "^7.3.1",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.1",
+    "uuid": "^14.0.3",
+    "vitest": "^5.0.3",
+    "ws": "^8.22.0"
+  }
+}

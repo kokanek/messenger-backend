@@ -1,0 +1,31 @@
+# Production (the GCP VM; the memory settings also fit a 1 GB e2-micro). Selected by COMPOSE_FILE=compose.yaml:compose.prod.yaml in .env.
+# No build sections: images are built in CI and pulled from ghcr.io.
+x-node-limits: &node-limits
+  NODE_OPTIONS: --max-old-space-size=128
+
+services:
+  gateway:
+    ports: ["80:80", "443:443"]
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
+    volumes:
+      - ./nginx/https.conf.template:/etc/nginx/templates/gateway.conf.template:ro
+      # The Let's Encrypt account key and certificate, kept across restarts.
+      - acme_state:/var/cache/nginx/acme-letsencrypt
+
+  auth-service:
+    environment: *node-limits
+  conversation-service:
+    environment: *node-limits
+  message-service:
+    environment: *node-limits
+
+  postgres:
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=40"]
+  mongo:
+    command: ["--wiredTigerCacheSizeGB", "0.25"]
+  redis:
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "48mb", "--maxmemory-policy", "volatile-lru"]
+
+volumes:
+  acme_state:

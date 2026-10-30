@@ -1,0 +1,6 @@
+{
+  // For the editor and for test/e2e/. Each workspace has its own tsconfig.json.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["test", "vitest.config.ts", "eslint.config.js"]
+}

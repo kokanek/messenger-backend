@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // Production builds use the compiled shared package (its dist/), not its source.
+    "customConditions": []
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,34 @@
+# Production: HTTPS for ${API_DOMAIN}, with a certificate from Let's Encrypt that nginx
+# requests and renews itself. ${API_DOMAIN} comes from the VM's .env (compose.prod.yaml).
+
+acme_issuer letsencrypt {
+  uri https://acme-v02.api.letsencrypt.org/directory;
+  # Keeps the account key and certificate on a volume, so a restart doesn't ask for a
+  # new certificate (Let's Encrypt rate-limits those).
+  state_path /var/cache/nginx/acme-letsencrypt;
+  accept_terms_of_service;
+}
+
+server {
+  listen 443 ssl;
+  server_name ${API_DOMAIN};
+
+  acme_certificate letsencrypt;
+  ssl_certificate $acme_certificate;
+  ssl_certificate_key $acme_certificate_key;
+  # Don't parse the certificate on every request.
+  ssl_certificate_cache max=2;
+
+  include /etc/nginx/routes.conf;
+}
+
+# Port 80 stays open: Let's Encrypt checks domain ownership over it (HTTP-01).
+# Everything else is sent to HTTPS.
+server {
+  listen 80;
+  server_name ${API_DOMAIN};
+
+  location / {
+    return 301 https://$host$request_uri;
+  }
+}

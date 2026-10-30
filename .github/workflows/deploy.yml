@@ -1,0 +1,69 @@
+name: deploy
+
+# Every push to main ships that commit to the VM. "Run workflow" (workflow_dispatch) ships
+# main by hand, for the first deploy.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # Build the three production images once, tagged with the commit, and push them to ghcr.io.
+  images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [auth-service, conversation-service, message-service]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          target: prod
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/messenger-${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # Point the VM at the new images, then check the API answers through the public gateway.
+  deploy:
+    needs: images
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      VM: ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519
+      - name: Copy compose files to the VM
+        run: scp -r compose.yaml compose.prod.yaml nginx infra "$VM:messenger/"
+      - name: Deploy this commit
+        run: ssh "$VM" "bash messenger/infra/deploy.sh ${{ github.sha }}"
+      - name: Smoke test through the public gateway
+        env:
+          API_DOMAIN: ${{ vars.API_DOMAIN }}
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' "https://$API_DOMAIN/api/users")
+          echo "GET /api/users without a token returned $status"
+          test "$status" = 401

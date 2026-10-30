@@ -1,0 +1,34 @@
+# Local development only. Loaded automatically by `docker compose up`.
+x-dev-build: &dev-build
+  context: .
+  target: dev
+
+services:
+  gateway:
+    ports: ["8080:80"]
+
+  auth-service:
+    build: { <<: *dev-build, dockerfile: services/auth-service/Dockerfile }
+    volumes:
+      - ./services/auth-service/src:/app/services/auth-service/src
+      - ./packages/shared/src:/app/packages/shared/src
+
+  conversation-service:
+    build: { <<: *dev-build, dockerfile: services/conversation-service/Dockerfile }
+    volumes:
+      - ./services/conversation-service/src:/app/services/conversation-service/src
+      - ./packages/shared/src:/app/packages/shared/src
+
+  message-service:
+    build: { <<: *dev-build, dockerfile: services/message-service/Dockerfile }
+    volumes:
+      - ./services/message-service/src:/app/services/message-service/src
+      - ./packages/shared/src:/app/packages/shared/src
+
+  # Published so tests and GUI tools on the host can reach the databases.
+  postgres:
+    ports: ["${POSTGRES_HOST_PORT:-5432}:5432"]
+  mongo:
+    ports: ["${MONGO_HOST_PORT:-27017}:27017"]
+  redis:
+    ports: ["${REDIS_HOST_PORT:-6379}:6379"]

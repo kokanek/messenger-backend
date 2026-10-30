@@ -1,0 +1,6 @@
+dist
+node_modules
+package-lock.json
+# Copied verbatim from the backend spec, where they were validated.
+compose*.yaml
+infra

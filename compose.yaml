@@ -1,0 +1,121 @@
+# Shared by every environment.
+# Local additions: compose.override.yaml (Compose loads it automatically).
+# Production additions: compose.prod.yaml (selected by COMPOSE_FILE in the VM's .env).
+name: messenger
+
+x-node-env: &node-env
+  NODE_ENV: ${NODE_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN:?set INTERNAL_TOKEN in .env}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?set ALLOWED_ORIGINS in .env}
+
+x-node-health: &node-health
+  # /ready checks the service's own databases. Uses Node's fetch so the image needs no curl.
+  test: ["CMD", "node", "-e", "fetch('http://localhost:'+process.env.PORT+'/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+  interval: 10s
+  timeout: 3s
+  retries: 6
+  start_period: 20s
+
+services:
+  gateway:
+    # The Debian-based image: it ships the ACME module that production uses for HTTPS.
+    image: nginx:1.30
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/routes.conf:/etc/nginx/routes.conf:ro
+      # Plain HTTP. compose.prod.yaml swaps in the HTTPS template at the same path.
+      - ./nginx/http.conf.template:/etc/nginx/templates/gateway.conf.template:ro
+    depends_on:
+      auth-service: { condition: service_healthy }
+      conversation-service: { condition: service_healthy }
+      message-service: { condition: service_healthy }
+
+  auth-service:
+    image: ${IMAGE_PREFIX:-messenger}-auth-service:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    environment:
+      <<: *node-env
+      PORT: 4001
+      DATABASE_URL: postgres://auth_svc:${AUTH_DB_PASSWORD}@postgres:5432/auth
+      REDIS_URL: redis://redis:6379
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+    healthcheck: *node-health
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  conversation-service:
+    image: ${IMAGE_PREFIX:-messenger}-conversation-service:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    environment:
+      <<: *node-env
+      PORT: 4002
+      MONGO_URL: mongodb://conversation_svc:${CONVERSATION_DB_PASSWORD}@mongo:27017/messenger?authSource=messenger
+      MESSAGE_SERVICE_URL: http://message-service:4003
+    healthcheck: *node-health
+    depends_on:
+      mongo: { condition: service_started }
+
+  message-service:
+    image: ${IMAGE_PREFIX:-messenger}-message-service:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    environment:
+      <<: *node-env
+      PORT: 4003
+      DATABASE_URL: postgres://message_svc:${MESSAGE_DB_PASSWORD}@postgres:5432/message
+      REDIS_URL: redis://redis:6379
+    healthcheck: *node-health
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  postgres:
+    # Pinned to 17: the 18 image moved its data directory, which changes the volume mount.
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in .env}
+      MESSAGE_DB_PASSWORD: ${MESSAGE_DB_PASSWORD:?set MESSAGE_DB_PASSWORD in .env}
+      CREATE_TEST_DATABASES: ${CREATE_TEST_DATABASES:-false}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}
+      CONVERSATION_DB_PASSWORD: ${CONVERSATION_DB_PASSWORD:?set CONVERSATION_DB_PASSWORD in .env}
+    volumes:
+      - mongo_data:/data/db
+      - ./infra/mongo/init:/docker-entrypoint-initdb.d:ro
+    # No healthcheck on purpose: mongosh is a Node process and starting it every few
+    # seconds costs too much memory on a 1 GB VM. conversation-service's /ready pings Mongo.
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # Redis holds only pub/sub channels and the user-list cache. Nothing to persist.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pg_data:
+  mongo_data:

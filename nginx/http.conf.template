@@ -1,0 +1,7 @@
+# Local development and CI: plain HTTP on port 80 (compose.override.yaml publishes it
+# as localhost:8080).
+server {
+  listen 80;
+
+  include /etc/nginx/routes.conf;
+}
