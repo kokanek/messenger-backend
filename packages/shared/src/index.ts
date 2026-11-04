@@ -5,6 +5,7 @@ export * from "./http.js";
 export * from "./internal.js";
 export * from "./lifecycle.js";
 export * from "./logger.js";
+export * from "./metrics.js";
 export * from "./migrate.js";
 export * from "./types.js";
 export * from "./redis.js";

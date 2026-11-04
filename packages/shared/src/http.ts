@@ -3,6 +3,7 @@ import express, { type Express, type RequestHandler } from "express";
 import { pinoHttp } from "pino-http";
 import type { Logger } from "pino";
 import { errorHandler, notFoundHandler } from "./errors.js";
+import { measureRequests, type Metrics } from "./metrics.js";
 
 // Each check answers "ok" or throws. /ready reports every check and returns 503 if any failed.
 export type ReadinessChecks = Record<string, () => Promise<unknown>>;
@@ -11,11 +12,13 @@ export interface CreateAppOptions {
   logger: Logger;
   allowedOrigins: string[];
   readiness: ReadinessChecks;
+  // Optional, so tests can build an app without metrics.
+  metrics?: Metrics;
 }
 
 // The middleware every service starts with (backend spec, sections 7.1 and 11.4).
 // Add routes to the returned app, then call finishApp(app).
-export function createApp({ logger, allowedOrigins, readiness }: CreateAppOptions): Express {
+export function createApp({ logger, allowedOrigins, readiness, metrics }: CreateAppOptions): Express {
   const app = express();
   app.disable("x-powered-by");
 
@@ -30,6 +33,9 @@ export function createApp({ logger, allowedOrigins, readiness }: CreateAppOption
         return id;
       },
       customAttributeKeys: { reqId: "requestId", responseTime: "durationMs" },
+      // Binds the id once, as `requestId`, on every line logged for this request. Without
+      // it, pino-http ignores the reqId rename and our req serializer drops the id.
+      quietReqLogger: true,
       serializers: {
         req: (req) => ({ method: req.method, path: req.url }),
         res: (res) => ({ status: res.statusCode }),
@@ -39,6 +45,8 @@ export function createApp({ logger, allowedOrigins, readiness }: CreateAppOption
       autoLogging: { ignore: (req) => req.url === "/health" || req.url === "/ready" },
     }),
   );
+
+  if (metrics) app.use(measureRequests(metrics));
 
   app.use((_req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -66,6 +74,15 @@ export function createApp({ logger, allowedOrigins, readiness }: CreateAppOption
     const ok = Object.values(checks).every((value) => value === "ok");
     res.status(ok ? 200 : 503).json({ status: ok ? "ok" : "unavailable", checks });
   });
+
+  // Prometheus format, read by Alloy over the Compose network. The gateway doesn't route
+  // /metrics, so it is never public.
+  if (metrics) {
+    app.get("/metrics", async (_req, res) => {
+      res.setHeader("Content-Type", metrics.registry.contentType);
+      res.send(await metrics.registry.metrics());
+    });
+  }
 
   return app;
 }

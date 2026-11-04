@@ -1,4 +1,4 @@
-import type { Logger, Redis, User } from "@messenger/shared";
+import type { Counter, Logger, Redis, User } from "@messenger/shared";
 
 const KEY = "cache:users";
 const TTL_SECONDS = 300;
@@ -11,13 +11,17 @@ export class UserListCache {
   constructor(
     private readonly redis: Redis,
     private readonly logger: Logger,
+    // messenger_user_cache_requests_total, when metrics are on: the cache hit rate.
+    private readonly requests?: Counter<"result">,
   ) {}
 
   async get(): Promise<User[] | null> {
     try {
       const cached = await this.redis.get(KEY);
+      this.requests?.inc({ result: cached ? "hit" : "miss" });
       return cached ? (JSON.parse(cached) as User[]) : null;
     } catch (err) {
+      this.requests?.inc({ result: "error" });
       this.logger.warn({ err: (err as Error).message }, "user cache read failed");
       return null;
     }

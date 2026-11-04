@@ -1,0 +1,77 @@
+// Grafana Alloy: the only observability container on the VM. It reads every container's
+// logs and scrapes each service's /metrics, then pushes both to Grafana Cloud, which
+// stores them and runs the dashboards. Credentials come from .env (GRAFANA_CLOUD_*).
+
+// ---------- Logs: container stdout -> Grafana Cloud Logs (Loki) ----------
+
+// Asks the Docker daemon which containers are running.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Keep only this Compose project, and label each stream with its Compose service name
+// ("auth-service", "gateway", ...). Labels must have few distinct values: request ids
+// and user ids stay inside the JSON line and are parsed at query time.
+discovery.relabel "logs" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "messenger"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  labels        = {}
+  relabel_rules = discovery.relabel.logs.rules
+  forward_to    = [loki.write.grafana_cloud.receiver]
+}
+
+loki.write "grafana_cloud" {
+  external_labels = { env = sys.env("NODE_ENV") }
+
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_LOGS_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_LOGS_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+}
+
+// ---------- Metrics: each service's /metrics -> Grafana Cloud Metrics ----------
+
+// Pull model: every scrape_interval, Alloy sends GET /metrics to each target.
+// Services are found by their Compose DNS names on the shared network.
+prometheus.scrape "services" {
+  targets = [
+    { "__address__" = "auth-service:4001" },
+    { "__address__" = "conversation-service:4002" },
+    { "__address__" = "message-service:4003" },
+  ]
+  scrape_interval = "60s"
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+// Remote write: pushes the scraped samples to Grafana Cloud's Prometheus-compatible store.
+prometheus.remote_write "grafana_cloud" {
+  external_labels = { env = sys.env("NODE_ENV") }
+
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_METRICS_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_METRICS_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+}

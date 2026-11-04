@@ -1,6 +1,6 @@
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
-import { verifyAccessToken, type Logger } from "@messenger/shared";
+import { verifyAccessToken, type Gauge, type Logger } from "@messenger/shared";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import type { Broadcaster } from "../broadcaster.js";
 import type { AuthedSocket, Registry } from "./registry.js";
@@ -21,6 +21,8 @@ export interface WsOptions {
   allowedOrigins: string[];
   logger: Logger;
   authTimeoutMs?: number; // tests shorten it
+  // messenger_websocket_connections, when metrics are on.
+  connections?: Gauge;
 }
 
 // The WebSocket is push-only: the client sends one `auth` frame, and from then on the
@@ -49,6 +51,7 @@ export function attachWebSocketServer(options: WsOptions) {
     ws.on("pong", () => alive.set(ws, true));
     let authed: AuthedSocket | undefined;
     let authStarted = false;
+    let counted = false; // in messenger_websocket_connections
 
     const authTimer = setTimeout(
       () => ws.close(CLOSE_AUTH_FAILED, "auth timeout"),
@@ -84,6 +87,9 @@ export function attachWebSocketServer(options: WsOptions) {
         return ws.close(CLOSE_AUTH_FAILED, "invalid token");
       }
       if (ws.readyState !== ws.OPEN) return;
+      // Counted only once authenticated; the close handler takes it off again.
+      options.connections?.inc();
+      counted = true;
       // Subscribe before saying ready, so no message published after `ready` is missed.
       if (registry.add(authed)) await broadcaster.userConnected?.(authed.userId);
       ws.send(
@@ -93,6 +99,7 @@ export function attachWebSocketServer(options: WsOptions) {
 
     ws.on("close", () => {
       clearTimeout(authTimer);
+      if (counted) options.connections?.dec();
       if (authed && registry.remove(authed)) {
         broadcaster.userDisconnected?.(authed.userId).catch((err: Error) => {
           logger.warn({ err: err.message }, "unsubscribe failed");

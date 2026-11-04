@@ -21,7 +21,7 @@ const loginBody = z.object({
 
 const refreshBody = z.object({ refreshToken: z.string().min(1).max(200) });
 
-export function authRoutes({ pool, config, logger }: AppDeps): Router {
+export function authRoutes({ pool, config, logger, metrics }: AppDeps): Router {
   const router = Router();
   // Checked against when the username doesn't exist, so a wrong username takes as long
   // as a wrong password and response times don't reveal which usernames exist.
@@ -47,10 +47,12 @@ export function authRoutes({ pool, config, logger }: AppDeps): Router {
     const row = await findUserByUsername(pool, username.toLowerCase());
     const passwordOk = await verify(row?.password_hash ?? (await dummyHash), password);
     if (!row || !passwordOk) {
+      metrics?.logins.inc({ result: "invalid_credentials" });
       throw new AppError("INVALID_CREDENTIALS", "Wrong username or password");
     }
     const { clientId, secret } = await createClient(pool, row.id, config.REFRESH_TOKEN_TTL_DAYS);
     await sendTokens(res, toUser(row), clientId, secret);
+    metrics?.logins.inc({ result: "success" });
   });
 
   router.post("/api/auth/refresh", async (req, res) => {

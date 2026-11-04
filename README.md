@@ -51,7 +51,7 @@ npm run lint && npm run typecheck
 ```
 
 Each test's name starts with its id from the spec (A1 to A8, MS1 to MS11, C1 to C5,
-R1 and R2, E1).
+R1 and R2, E1 and E2; the metrics tests are M1 to M5).
 
 ## Stages
 
@@ -61,6 +61,26 @@ The backend is built in two stages, which the course teaches in order:
   real-time delivery looks up sockets in memory (`LocalBroadcaster`).
 - **Stage 2**: Redis for delivery across several message-service processes, and a cached
   user list. This is the "Scaling & Performance" lesson. See the spec's section 14.
+
+## Observability (Module 5)
+
+Each service serves Prometheus metrics at `/metrics` (on the Compose network only; the
+gateway returns 404 for it). The gateway logs one JSON line per request with the same
+`requestId` the services log, and `GET /api/health` is the public uptime check.
+
+One Grafana Alloy container ships every container's logs and each service's metrics to
+Grafana Cloud's free tier. It is off by default. To turn it on, add to `.env`:
+
+```bash
+COMPOSE_PROFILES=observability
+GRAFANA_CLOUD_METRICS_URL=…   # Cloud Portal > your stack > Prometheus > Details
+GRAFANA_CLOUD_METRICS_USER=…  # same page, the User number
+GRAFANA_CLOUD_LOGS_URL=…      # Loki > Details: the URL, plus /loki/api/v1/push
+GRAFANA_CLOUD_LOGS_USER=…     # same page, the User number
+GRAFANA_CLOUD_TOKEN=…         # Access Policies: metrics:write and logs:write
+```
+
+Then `docker compose up -d`. Step-by-step setup: `../observability-spec.md`, section 7.
 
 ## Deploy
 

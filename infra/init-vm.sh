@@ -58,6 +58,18 @@ EOF
              MESSAGE_DB_PASSWORD MONGO_ROOT_PASSWORD CONVERSATION_DB_PASSWORD; do
       echo "$v=$(openssl rand -hex 32)"
     done
+    cat <<'EOF'
+
+# Observability (Module 5, lesson 3). Leave commented out to run without Grafana Cloud.
+# To ship logs and metrics, uncomment all six and fill them from your Grafana Cloud stack
+# (code/observability-spec.md, section 7).
+# COMPOSE_PROFILES=observability
+# GRAFANA_CLOUD_METRICS_URL=https://prometheus-xxx.grafana.net/api/prom/push
+# GRAFANA_CLOUD_METRICS_USER=
+# GRAFANA_CLOUD_LOGS_URL=https://logs-xxx.grafana.net/loki/api/v1/push
+# GRAFANA_CLOUD_LOGS_USER=
+# GRAFANA_CLOUD_TOKEN=
+EOF
   } > ~/messenger/.env
 fi
 

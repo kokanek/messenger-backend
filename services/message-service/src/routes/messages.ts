@@ -23,7 +23,7 @@ const sendBody = z.object({
 
 const readBody = z.object({ seq: z.number().int().min(0) });
 
-export function messageRoutes({ pool, config, broadcaster }: AppDeps): Router {
+export function messageRoutes({ pool, config, broadcaster, metrics }: AppDeps): Router {
   const router = Router();
   router.use("/api/conversations", requireAuth(config.JWT_SECRET));
 
@@ -62,6 +62,7 @@ export function messageRoutes({ pool, config, broadcaster }: AppDeps): Router {
       text,
     });
     if (created) {
+      metrics?.messagesSent.inc();
       // Only after COMMIT: a pushed message is always one that is really stored.
       // Every member gets it, including the author, whose other devices need it too.
       await broadcaster.publish(memberIds, { type: "message.created", payload: message });

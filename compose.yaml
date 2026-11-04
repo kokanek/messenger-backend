@@ -10,6 +10,11 @@ x-node-env: &node-env
   INTERNAL_TOKEN: ${INTERNAL_TOKEN:?set INTERNAL_TOKEN in .env}
   ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?set ALLOWED_ORIGINS in .env}
 
+# Docker's default json-file driver never deletes old logs. The local driver keeps 100 MB
+# per container (max-size 20m x max-file 5) and compresses rotated files.
+x-logging: &logging
+  driver: local
+
 x-node-health: &node-health
   # /ready checks the service's own databases. Uses Node's fetch so the image needs no curl.
   test: ["CMD", "node", "-e", "fetch('http://localhost:'+process.env.PORT+'/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
@@ -23,6 +28,7 @@ services:
     # The Debian-based image: it ships the ACME module that production uses for HTTPS.
     image: nginx:1.30
     restart: unless-stopped
+    logging: *logging
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/routes.conf:/etc/nginx/routes.conf:ro
@@ -36,6 +42,7 @@ services:
   auth-service:
     image: ${IMAGE_PREFIX:-messenger}-auth-service:${IMAGE_TAG:-dev}
     restart: unless-stopped
+    logging: *logging
     environment:
       <<: *node-env
       PORT: 4001
@@ -51,6 +58,7 @@ services:
   conversation-service:
     image: ${IMAGE_PREFIX:-messenger}-conversation-service:${IMAGE_TAG:-dev}
     restart: unless-stopped
+    logging: *logging
     environment:
       <<: *node-env
       PORT: 4002
@@ -63,6 +71,7 @@ services:
   message-service:
     image: ${IMAGE_PREFIX:-messenger}-message-service:${IMAGE_TAG:-dev}
     restart: unless-stopped
+    logging: *logging
     environment:
       <<: *node-env
       PORT: 4003
@@ -77,6 +86,7 @@ services:
     # Pinned to 17: the 18 image moved its data directory, which changes the volume mount.
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -95,6 +105,7 @@ services:
   mongo:
     image: mongo:8.0
     restart: unless-stopped
+    logging: *logging
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}
@@ -108,6 +119,7 @@ services:
   redis:
     image: redis:8-alpine
     restart: unless-stopped
+    logging: *logging
     # Redis holds only pub/sub channels and the user-list cache. Nothing to persist.
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     healthcheck:
@@ -116,6 +128,38 @@ services:
       timeout: 3s
       retries: 10
 
+  # Observability (Module 5): ships every container's logs and each service's /metrics to
+  # Grafana Cloud. Off unless COMPOSE_PROFILES includes "observability" (set in .env),
+  # so local development and CI need no Grafana Cloud account.
+  alloy:
+    image: grafana/alloy:v1.21.3
+    profiles: ["observability"]
+    restart: unless-stopped
+    logging: *logging
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    # ${VAR:-}, never ${VAR:?}: Compose reads the whole file even when the profile is off,
+    # so a required variable here would break `docker compose up` for everyone else.
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      GRAFANA_CLOUD_METRICS_URL: ${GRAFANA_CLOUD_METRICS_URL:-}
+      GRAFANA_CLOUD_METRICS_USER: ${GRAFANA_CLOUD_METRICS_USER:-}
+      GRAFANA_CLOUD_LOGS_URL: ${GRAFANA_CLOUD_LOGS_URL:-}
+      GRAFANA_CLOUD_LOGS_USER: ${GRAFANA_CLOUD_LOGS_USER:-}
+      GRAFANA_CLOUD_TOKEN: ${GRAFANA_CLOUD_TOKEN:-}
+    volumes:
+      - ./infra/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # Alloy asks the Docker daemon for the container list and their logs. This socket
+      # is root access to the host; :ro does not limit what the Docker API allows.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Remembers how far it has read each log, so a restart doesn't resend them.
+      - alloy_data:/var/lib/alloy/data
+    # Port 12345 (Alloy's debug UI) is deliberately not published.
+
 volumes:
   pg_data:
   mongo_data:
+  alloy_data:

@@ -18,7 +18,7 @@ const createBody = z.discriminatedUnion("type", [
   }),
 ]);
 
-export function conversationRoutes({ db, config, messageService, logger }: AppDeps): Router {
+export function conversationRoutes({ db, config, messageService, logger, metrics }: AppDeps): Router {
   const router = Router();
   const collection = conversations(db);
   router.use("/api/conversations", requireAuth(config.JWT_SECRET));
@@ -99,6 +99,7 @@ export function conversationRoutes({ db, config, messageService, logger }: AppDe
       );
     } catch (err) {
       await collection.deleteOne({ _id: doc._id });
+      metrics?.compensations.inc();
       logger.warn(
         { conversationId: doc._id, requestId },
         "registering with message-service failed; conversation removed",

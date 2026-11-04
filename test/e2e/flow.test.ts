@@ -111,4 +111,14 @@ describe("end to end", () => {
     expect(read.status).toBe(200);
     expect((await listFor()).unread).toBe(0);
   });
+
+  it("E2: the public health check answers through the gateway; /metrics does not", async () => {
+    const health = await api<{ status: string; checks: Record<string, string> }>("GET", "/api/health");
+    expect(health.status).toBe(200);
+    expect(health.body).toEqual({ status: "ok", checks: { postgres: "ok", redis: "ok" } });
+
+    // Only Alloy, on the Compose network, may read the services' metrics.
+    const metrics = await fetch(BASE + "/metrics");
+    expect(metrics.status).toBe(404);
+  });
 });
